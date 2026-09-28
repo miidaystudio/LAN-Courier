@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SecretNote, Peer } from '../types';
-import { Lock, Unlock, Key, Copy, Check, ShieldAlert, Sparkles } from 'lucide-react';
+import { Lock, Unlock, Key, Copy, Check, ShieldAlert, Sparkles, X } from 'lucide-react';
 
 interface SecretBeamModalProps {
   peers: Peer[];
@@ -20,7 +20,6 @@ export function SecretBeamModal({
   const [passphrase, setPassphrase] = useState('');
   const [targetPeerId, setTargetPeerId] = useState<string>('');
   
-  // Decrypt inputs keyed by noteId
   const [decryptPassphrases, setDecryptPassphrases] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -44,64 +43,63 @@ export function SecretBeamModal({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const lockedCount = secretNotes.filter((n) => n.status === 'locked').length;
+
   return (
     <>
-      {/* Floating Trigger Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 hover:bg-zinc-800 text-white shadow-md transition-all hover:scale-105"
+        className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-black hover:bg-zinc-200 shadow-[0_0_15px_rgba(255,255,255,0.15)] transition-all hover:scale-[1.02] active:scale-[0.98]"
       >
-        <Lock className="w-3.5 h-3.5 text-amber-400" />
-        <span>E2EE Secret Beam</span>
-        {secretNotes.filter((n) => n.status === 'locked').length > 0 && (
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+        <Lock className="w-3.5 h-3.5 text-black" />
+        <span>Secret Beam</span>
+        {lockedCount > 0 && (
+          <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse" />
         )}
       </button>
 
-      {/* Secret Beam Modal Dialog */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-xl w-full shadow-2xl border border-zinc-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-zinc-100 mb-6">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-                  <Lock className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-900">
-                    End-to-End Encrypted Vault
-                  </h3>
-                  <p className="text-xs text-zinc-500">
-                    Browser-native AES-256-GCM. Zero server decryptability.
-                  </p>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#0D0D10]/95 backdrop-blur-2xl rounded-3xl p-6 sm:p-8 max-w-xl w-full shadow-[0_16px_48px_rgba(0,0,0,0.8)] border border-white/[0.12] max-h-[90vh] overflow-y-auto relative">
+            <button
+              onClick={() => setIsOpen(false)}
+              className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white transition-colors border border-white/10"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3.5 mb-6 pb-4 border-b border-white/[0.08]">
+              <div className="w-11 h-11 rounded-2xl bg-white/[0.08] border border-white/20 flex items-center justify-center text-white shadow-xs">
+                <Lock className="w-5 h-5 text-white" />
               </div>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-500 text-sm font-mono transition-colors"
-              >
-                ✕
-              </button>
+              <div>
+                <h3 className="text-xl font-bold text-white leading-tight">
+                  End-to-End Encrypted Vault
+                </h3>
+                <p className="text-xs text-zinc-400 font-medium">
+                  Client-side AES-256-GCM cipher. Never decrypted or stored on any server.
+                </p>
+              </div>
             </div>
 
             {/* Compose Encrypted Note */}
-            <form onSubmit={handleSend} className="space-y-4 mb-8">
+            <form onSubmit={handleSend} className="space-y-4 mb-8 bg-black/50 p-5 rounded-3xl border border-white/[0.08] shadow-inner">
               <div>
-                <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1.5">
-                  Secret Note / Password Payload
+                <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1.5">
+                  Private Note / Password Payload
                 </label>
                 <textarea
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
                   rows={3}
-                  placeholder="Type passwords, recovery seeds, API keys, or confidential notes..."
-                  className="w-full p-3 rounded-2xl text-sm bg-zinc-50 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                  placeholder="Paste passwords, seeds, API keys, or confidential notes..."
+                  className="w-full p-3 rounded-2xl text-sm bg-black/60 border border-white/10 text-white focus:outline-none focus:border-white font-mono"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
+                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
                     Encryption Passphrase
                   </label>
                   <div className="relative">
@@ -109,26 +107,26 @@ export function SecretBeamModal({
                       type="password"
                       value={passphrase}
                       onChange={(e) => setPassphrase(e.target.value)}
-                      placeholder="Shared secret password"
-                      className="w-full pl-9 pr-3 py-2 rounded-xl text-sm bg-zinc-50 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      placeholder="Passphrase to unlock"
+                      className="w-full pl-9 pr-3 py-2 rounded-xl text-sm bg-black/60 border border-white/10 text-white focus:outline-none focus:border-white"
                     />
-                    <Key className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                    <Key className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                    Target Recipient
+                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                    Recipient Device
                   </label>
                   <select
                     value={targetPeerId}
                     onChange={(e) => setTargetPeerId(e.target.value)}
-                    className="w-full py-2 px-3 rounded-xl text-sm bg-zinc-50 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                    className="w-full py-2 px-3 rounded-xl text-sm bg-black/60 border border-white/10 text-white focus:outline-none focus:border-white"
                   >
                     <option value="">Broadcast to Room (Encrypted)</option>
                     {peers.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.deviceName}
+                      <option key={p.id} value={p.id} className="bg-zinc-900 text-white">
+                        {p.deviceName} ({p.ipAddress || p.ip || 'LAN'})
                       </option>
                     ))}
                   </select>
@@ -138,56 +136,57 @@ export function SecretBeamModal({
               <button
                 type="submit"
                 disabled={!noteText.trim() || !passphrase.trim()}
-                className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-white text-sm font-semibold transition-colors shadow-sm"
+                className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-full bg-white hover:bg-zinc-200 disabled:opacity-40 text-black text-xs font-bold transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)]"
               >
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>Encrypt & Beam Payload</span>
+                <Sparkles className="w-4 h-4 text-black" />
+                <span>Encrypt & Beam to Recipient</span>
               </button>
             </form>
 
             {/* Received Encrypted Vault Notes */}
             <div className="space-y-3">
-              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                Received Secret Payloads ({secretNotes.length})
+              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                Received Secret Notes ({secretNotes.length})
               </h4>
 
               {secretNotes.length === 0 ? (
-                <div className="text-center py-6 text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-2xl">
-                  No encrypted notes received yet
+                <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-white/10 rounded-3xl bg-white/[0.02]">
+                  No encrypted secrets received yet
                 </div>
               ) : (
                 secretNotes.map((note) => (
                   <div
                     key={note.id}
-                    className="p-4 rounded-2xl border border-zinc-200 bg-zinc-50/70 space-y-3"
+                    className="p-4 rounded-3xl border border-white/[0.08] bg-black/40 shadow-sm space-y-3"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {note.status === 'decrypted' ? (
-                          <Unlock className="w-4 h-4 text-emerald-600" />
+                          <Unlock className="w-4 h-4 text-emerald-400" />
                         ) : (
-                          <Lock className="w-4 h-4 text-amber-600" />
+                          <Lock className="w-4 h-4 text-amber-400" />
                         )}
-                        <span className="text-xs font-bold text-zinc-900">
+                        <span className="text-xs font-bold text-white">
                           From: {note.senderName}
                         </span>
                       </div>
-                      <span className="text-[10px] text-zinc-400 font-mono">
+                      <span className="text-[10px] text-zinc-500 font-mono">
                         {new Date(note.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
 
                     {note.status === 'decrypted' ? (
-                      <div className="p-3 bg-white rounded-xl border border-emerald-200 flex items-start justify-between gap-2">
-                        <p className="text-sm font-mono text-zinc-800 break-all select-all">
+                      <div className="p-3.5 bg-emerald-500/10 rounded-2xl border border-emerald-500/30 flex items-start justify-between gap-2">
+                        <p className="text-sm font-mono text-emerald-300 break-all select-all">
                           {note.decryptedText}
                         </p>
                         <button
                           onClick={() => handleCopy(note.id, note.decryptedText || '')}
-                          className="flex-shrink-0 p-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs transition-colors"
+                          className="flex-shrink-0 p-1.5 rounded-lg bg-black/60 hover:bg-black text-white text-xs border border-white/10 transition-colors shadow-xs"
+                          title="Copy to clipboard"
                         >
                           {copiedId === note.id ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
                           ) : (
                             <Copy className="w-3.5 h-3.5" />
                           )}
@@ -198,7 +197,7 @@ export function SecretBeamModal({
                         <div className="flex gap-2">
                           <input
                             type="password"
-                            placeholder="Enter passphrase to decrypt"
+                            placeholder="Enter passphrase to unlock"
                             value={decryptPassphrases[note.id] || ''}
                             onChange={(e) =>
                               setDecryptPassphrases((prev) => ({
@@ -206,18 +205,18 @@ export function SecretBeamModal({
                                 [note.id]: e.target.value,
                               }))
                             }
-                            className="flex-1 px-3 py-1.5 rounded-xl text-xs bg-white border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                            className="flex-1 px-3 py-1.5 rounded-xl text-xs bg-black/60 border border-white/10 text-white focus:outline-none focus:border-white"
                           />
                           <button
                             type="button"
                             onClick={() => handleDecrypt(note.id)}
-                            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors"
+                            className="px-4 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black text-xs font-bold transition-colors shadow-xs"
                           >
                             Decrypt
                           </button>
                         </div>
                         {note.status === 'failed' && (
-                          <p className="text-[11px] text-red-600 flex items-center gap-1">
+                          <p className="text-[11px] text-rose-400 flex items-center gap-1 font-medium">
                             <ShieldAlert className="w-3 h-3" />
                             <span>Incorrect passphrase. Decryption failed.</span>
                           </p>

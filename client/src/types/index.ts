@@ -85,6 +85,18 @@ export interface SecretNote {
   status: 'locked' | 'decrypted' | 'failed';
 }
 
+export interface LedgerEntry {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  direction: 'sending' | 'receiving';
+  peerName: string;
+  timestamp: number;
+  durationMs?: number;
+  speedMbps?: number;
+  status: 'completed' | 'failed' | 'rejected';
+}
+
 export interface DirectMessagePayload {
   text: string;
   senderName: string;

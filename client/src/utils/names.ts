@@ -1,12 +1,12 @@
 const AVATAR_COLORS = [
-  { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
-  { bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
-  { bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
-  { bg: 'bg-violet-100 text-violet-800 border-violet-300', dot: 'bg-violet-500' },
-  { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
-  { bg: 'bg-cyan-100 text-cyan-800 border-cyan-300', dot: 'bg-cyan-500' },
-  { bg: 'bg-indigo-100 text-indigo-800 border-indigo-300', dot: 'bg-indigo-500' },
-  { bg: 'bg-teal-100 text-teal-800 border-teal-300', dot: 'bg-teal-500' },
+  { bg: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' },
+  { bg: 'bg-blue-500/15 text-blue-300 border-blue-500/30', dot: 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.6)]' },
+  { bg: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]' },
+  { bg: 'bg-purple-500/15 text-purple-300 border-purple-500/30', dot: 'bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]' },
+  { bg: 'bg-rose-500/15 text-rose-300 border-rose-500/30', dot: 'bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.6)]' },
+  { bg: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30', dot: 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]' },
+  { bg: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30', dot: 'bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.6)]' },
+  { bg: 'bg-teal-500/15 text-teal-300 border-teal-500/30', dot: 'bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.6)]' },
 ];
 
 export function detectRealDeviceName(): { name: string; type: 'desktop' | 'mobile' | 'tablet' } {

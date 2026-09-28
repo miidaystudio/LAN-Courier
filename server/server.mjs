@@ -1,10 +1,9 @@
 import http from 'http';
 import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-
-const PORT = process.env.PORT || 5000;
-
 import os from 'os';
+
+const DEFAULT_PORT = parseInt(process.env.PORT || '5000', 10);
 
 function getPrimaryLANIP() {
   const interfaces = os.networkInterfaces();
@@ -16,17 +15,6 @@ function getPrimaryLANIP() {
     }
   }
   return '127.0.0.1';
-}
-
-function getSubnetHash(ip) {
-  let cleanIp = (ip || '127.0.0.1').replace(/^.*:/, '');
-  if (cleanIp === '127.0.0.1' || cleanIp === 'localhost' || cleanIp === '1') {
-    cleanIp = getPrimaryLANIP();
-  }
-  const parts = cleanIp.split('.');
-  const subnet = parts.length === 4 ? `${parts[0]}.${parts[1]}.${parts[2]}.0/24` : '192.168.1.0/24';
-  const hash = crypto.createHash('sha256').update('lan-courier-subnet:' + subnet).digest('hex');
-  return { subnet, hash: hash.slice(0, 8) };
 }
 
 const rooms = new Map(); // roomCode -> Map<peerId, client>
@@ -62,7 +50,7 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'healthy', activeClients: clients.size }));
+    res.end(JSON.stringify({ status: 'healthy', activeClients: clients.size, port: server.address()?.port }));
     return;
   }
 
@@ -73,7 +61,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-  if (req.url.startsWith('/ws')) {
+  if (req.url && req.url.startsWith('/ws')) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
     });
@@ -110,13 +98,16 @@ function broadcastPeerList(roomCode) {
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const clientIp = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress || '127.0.0.1';
-  const { subnet, hash } = getSubnetHash(clientIp);
+  let clientIp = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress || '127.0.0.1';
+  clientIp = clientIp.replace(/^.*:/, '');
+  if (clientIp === '127.0.0.1' || clientIp === 'localhost' || clientIp === '1' || !clientIp) {
+    clientIp = getPrimaryLANIP();
+  }
 
   const peerId = url.searchParams.get('peerId') || crypto.randomUUID();
   const deviceName = url.searchParams.get('deviceName') || 'Anonymous Device';
   const deviceType = url.searchParams.get('deviceType') || 'desktop';
-  let roomCode = url.searchParams.get('roomCode') || hash;
+  let roomCode = url.searchParams.get('roomCode') || '#STUDIO-LAN';
 
   const client = { id: peerId, deviceName, deviceType, ip: clientIp, roomCode, ws };
   clients.set(peerId, client);
@@ -140,7 +131,7 @@ wss.on('connection', (ws, req) => {
       }
 
       if (env.type === 'join-custom-room') {
-        const newRoom = env.payload?.roomCode;
+        const newRoom = env.payload?.roomCode || '#STUDIO-LAN';
         if (newRoom && newRoom !== client.roomCode) {
           const oldRoom = client.roomCode;
           rooms.get(oldRoom)?.delete(peerId);
@@ -188,8 +179,27 @@ wss.on('connection', (ws, req) => {
       broadcastPeerList(client.roomCode);
     }
   });
+
+  ws.on('error', (err) => {
+    console.warn(`[Hub] WebSocket client socket error for ${deviceName}:`, err.message);
+  });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 LAN Courier Signaling Server listening on http://0.0.0.0:${PORT}`);
-});
+function startServer(port) {
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`🚀 LAN Courier Studio Signaling Server listening on http://0.0.0.0:${port}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Warn] Port ${port} is currently occupied. Retrying on port ${port + 1}...`);
+      setTimeout(() => {
+        startServer(port + 1);
+      }, 500);
+    } else {
+      console.error('[Error] Server error:', err);
+    }
+  });
+}
+
+startServer(DEFAULT_PORT);

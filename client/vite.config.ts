@@ -14,7 +14,12 @@ export default defineConfig({
         ws: true,
         configure: (proxy) => {
           proxy.on('error', (_err) => {
-            // Suppress noisy ECONNREFUSED logs while backend is starting
+            // Suppress transient proxy connection resets during hot reloads
+          });
+          proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+            socket.on('error', (_err) => {
+              // Suppress socket resets
+            });
           });
         },
       },
@@ -23,7 +28,7 @@ export default defineConfig({
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('error', (_err) => {
-            // Suppress noisy ECONNREFUSED logs while backend is starting
+            // Suppress proxy errors when backend is initializing
           });
         },
       },

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, RefreshCw, Radio, Check, Globe } from 'lucide-react';
+import { KeyRound, RefreshCw, Radio, Check, Globe, X } from 'lucide-react';
 
 interface RoomCodeSwitcherProps {
   roomCode: string;
@@ -39,89 +39,87 @@ export function RoomCodeSwitcher({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-white hover:bg-zinc-50 border border-zinc-200 shadow-sm transition-colors text-zinc-800"
+        className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-zinc-200 transition-all hover:scale-[1.02] active:scale-[0.98]"
         title="Switch Room or Enter 6-Digit PIN"
       >
         {isCustomRoom ? (
           <>
-            <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-            <span className="font-mono font-bold text-amber-900 tracking-wider">PIN: {roomCode}</span>
+            <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+            <span className="font-mono font-bold text-amber-300 tracking-wider">PIN: #{roomCode}</span>
           </>
         ) : (
           <>
-            <Globe className="w-3.5 h-3.5 text-blue-600" />
-            <span className="font-mono text-zinc-700">Subnet: {roomCode || 'Auto'}</span>
+            <Globe className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="font-mono text-zinc-300">Room: {roomCode || '#STUDIO-LAN'}</span>
           </>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-zinc-200 p-4 z-50 animate-fade-in">
-          <div className="flex items-center justify-between pb-3 border-b border-zinc-100 mb-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-800">
-              Room Connectivity Mode
+        <div className="absolute right-0 mt-2 w-80 bg-[#0D0D10]/95 backdrop-blur-2xl rounded-3xl shadow-[0_16px_48px_rgba(0,0,0,0.8)] border border-white/[0.12] p-5 z-50 animate-fade-in">
+          <div className="flex items-center justify-between pb-3 border-b border-white/[0.08] mb-3">
+            <h4 className="text-base font-bold text-white">
+              Studio Mesh Room
             </h4>
             <button
               onClick={() => setIsOpen(false)}
-              className="text-xs text-zinc-400 hover:text-zinc-600 font-mono"
+              className="w-6 h-6 rounded-full bg-white/[0.08] hover:bg-white/[0.15] flex items-center justify-center text-zinc-400 hover:text-white transition-colors border border-white/10"
             >
-              ✕
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <p className="text-xs text-zinc-500 mb-3">
-            Use a 6-digit PIN if devices are on isolated Wi-Fi (guest networks, mobile hotspots, or VLANs).
+          <p className="text-xs text-zinc-400 mb-4 leading-relaxed font-medium">
+            Devices on this Wi-Fi pair via <code className="font-mono font-bold text-white bg-white/10 px-1.5 py-0.5 rounded">#STUDIO-LAN</code>. Enter a 6-digit PIN for isolated VLANs/hotspots.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-semibold text-zinc-700">
-                  Custom 6-Digit Room PIN
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-zinc-400">
+                  Custom PIN / Room
                 </label>
                 <button
                   type="button"
                   onClick={generateRandomPin}
-                  className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700"
+                  className="inline-flex items-center gap-1 text-[11px] text-zinc-300 hover:text-white font-semibold"
                 >
                   <RefreshCw className="w-3 h-3" />
-                  <span>Random</span>
+                  <span>Generate</span>
                 </button>
               </div>
               <input
                 type="text"
-                maxLength={8}
+                maxLength={10}
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value.toUpperCase())}
                 placeholder="e.g. 849201"
-                className="w-full px-3 py-2 rounded-xl text-center font-mono font-bold text-base tracking-widest bg-zinc-50 border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                className="w-full px-3 py-2 rounded-2xl text-center font-mono font-bold text-base tracking-widest bg-black/60 border border-white/20 text-white focus:outline-none focus:border-white shadow-inner"
               />
             </div>
 
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={pinInput.trim().length < 4}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-white text-xs font-medium transition-colors"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Join PIN Room</span>
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={pinInput.trim().length < 3}
+              className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full bg-white hover:bg-zinc-200 disabled:opacity-40 text-black text-xs font-bold transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)]"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Join Custom PIN Room</span>
+            </button>
           </form>
 
           {isCustomRoom && (
-            <div className="mt-3 pt-3 border-t border-zinc-100">
+            <div className="mt-3 pt-3 border-t border-white/[0.08]">
               <button
                 type="button"
                 onClick={() => {
                   onResetToSubnet();
                   setIsOpen(false);
                 }}
-                className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs font-medium transition-colors"
+                className="w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-zinc-300 border border-white/10 text-xs font-semibold transition-colors"
               >
-                <Radio className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Reset to Auto Wi-Fi Subnet</span>
+                <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Reset to Default Studio Room</span>
               </button>
             </div>
           )}

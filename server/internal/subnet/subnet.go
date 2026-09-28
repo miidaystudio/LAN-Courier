@@ -10,22 +10,34 @@ import (
 
 // ExtractClientIP retrieves the real IP address of the client from HTTP headers or RemoteAddr.
 func ExtractClientIP(r *http.Request) string {
+	var rawIP string
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return strings.TrimSpace(ip)
-	}
-
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		rawIP = strings.TrimSpace(ip)
+	} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
+			rawIP = strings.TrimSpace(parts[0])
+		}
+	} else {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err == nil {
+			rawIP = host
+		} else {
+			rawIP = r.RemoteAddr
 		}
 	}
 
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+	rawIP = strings.TrimPrefix(rawIP, "::ffff:")
+
+	// If loopback or local, resolve the host's actual LAN IP
+	if rawIP == "127.0.0.1" || rawIP == "::1" || rawIP == "localhost" || rawIP == "" {
+		lanIP := GetPrimaryHostLANIP()
+		if lanIP != "" {
+			return lanIP
+		}
 	}
-	return r.RemoteAddr
+
+	return rawIP
 }
 
 // GetPrimaryHostLANIP returns the server's active LAN IPv4 address (e.g., 192.168.x.x or 10.x.x.x)

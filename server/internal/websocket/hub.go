@@ -119,6 +119,9 @@ func (h *Hub) Run() {
 
 // SwitchRoom moves a client to a new 6-digit PIN room or subnet room
 func (h *Hub) SwitchRoom(client *Client, newRoomCode string) {
+	if newRoomCode == "" {
+		newRoomCode = "#STUDIO-LAN"
+	}
 	h.mu.Lock()
 	oldRoomCode := client.RoomCode
 
@@ -245,13 +248,17 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := subnet.ExtractClientIP(r)
-	subnetCIDR, subnetHash := subnet.DeriveSubnetCIDR(clientIP)
+	subnetCIDR, _ := subnet.DeriveSubnetCIDR(clientIP)
 
 	query := r.URL.Query()
 	deviceName := query.Get("deviceName")
 	if deviceName == "" {
+		deviceName = query.Get("name")
+	}
+	if deviceName == "" {
 		deviceName = "Anonymous Device"
 	}
+
 	deviceType := query.Get("deviceType")
 	if deviceType == "" {
 		deviceType = "desktop"
@@ -259,13 +266,19 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	peerID := query.Get("peerId")
 	if peerID == "" {
+		peerID = query.Get("id")
+	}
+	if peerID == "" {
 		peerID = uuid.New().String()
 	}
 
-	// Room assignment: use custom roomCode if passed in query, else default to subnet hash
+	// Room assignment: default all connected clients to #STUDIO-LAN unless custom room is specified
 	roomCode := query.Get("roomCode")
 	if roomCode == "" {
-		roomCode = subnetHash[:8] // Clean 8-char subnet room ID (e.g. 7f8a12bc)
+		roomCode = query.Get("room")
+	}
+	if roomCode == "" {
+		roomCode = "#STUDIO-LAN"
 	}
 
 	client := &Client{

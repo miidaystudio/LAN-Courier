@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Peer, SignalingMessage, FileMetadata, TransferState, ConsentRequest, SecretNote, ReceivedFile } from '../types';
+import { Peer, SignalingMessage, FileMetadata, TransferState, ConsentRequest, SecretNote, ReceivedFile, LedgerEntry } from '../types';
 import { getDeviceIdentity } from '../utils/names';
 import { encryptText, decryptText, EncryptedPayload } from '../utils/crypto';
-import { playConnectSound, playTransferStartSound, playTransferCompleteSound, playSecretSound } from '../utils/audio';
+import { playConnectSound, playTransferStartSound, playTransferCompleteSound, playSecretSound } from '../lib/audio';
 import { FileItem } from '../utils/fileTree';
 
-const CHUNK_SIZE = 64 * 1024; // 64 KB binary pieces
-const MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024; // 8 MB backpressure limit
+const CHUNK_SIZE = 64 * 1024; // 64 KB binary chunks for high-speed beam
+const MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024; // 8 MB backpressure threshold
 const LOW_BUFFERED_THRESHOLD = 2 * 1024 * 1024; // 2 MB resume threshold
+const DEFAULT_STUDIO_ROOM = '#STUDIO-LAN';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' }
+    { urls: 'stun:global.stun.twilio.com:3478' },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -21,18 +22,38 @@ export function useWebRTC() {
   const [self, setSelf] = useState(getDeviceIdentity());
   const [peers, setPeers] = useState<Peer[]>([]);
   const [myIP, setMyIP] = useState<string>('');
-  const [roomCode, setRoomCode] = useState<string>(() => localStorage.getItem('lan_courier_room_code') || '');
-  const [isCustomRoom, setIsCustomRoom] = useState<boolean>(() => !!localStorage.getItem('lan_courier_room_code'));
+  const [roomCode, setRoomCode] = useState<string>(() => localStorage.getItem('lan_courier_room_code') || DEFAULT_STUDIO_ROOM);
+  const [isCustomRoom, setIsCustomRoom] = useState<boolean>(() => {
+    const saved = localStorage.getItem('lan_courier_room_code');
+    return Boolean(saved && saved !== DEFAULT_STUDIO_ROOM);
+  });
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [activeTransfers, setActiveTransfers] = useState<Map<string, TransferState>>(new Map());
   const [pendingConsent, setPendingConsent] = useState<ConsentRequest | null>(null);
   const [secretNotes, setSecretNotes] = useState<SecretNote[]>([]);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const [transferLedger, setTransferLedger] = useState<LedgerEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('lan_courier_ledger');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const wsRef = useRef<WebSocket | null>(null);
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const dataChannels = useRef<Map<string, RTCDataChannel>>(new Map());
-  
+
+  // Persist session ledger
+  useEffect(() => {
+    try {
+      localStorage.setItem('lan_courier_ledger', JSON.stringify(transferLedger.slice(0, 50)));
+    } catch {
+      // Ignore quota exceeded
+    }
+  }, [transferLedger]);
+
   // Receiver-side file assembling buffers: transferId -> metadata & chunks
   const receivingBuffers = useRef<Map<string, {
     metadata: FileMetadata;
@@ -48,41 +69,49 @@ export function useWebRTC() {
   // Sender file queue for pending transfers
   const pendingFilesToSend = useRef<Map<string, { items: FileItem[]; targetPeerId: string; targetPeerName: string }>>(new Map());
 
-  // 1. Establish WebSocket Signaling connection with dual-endpoint failover
+  // 1. Establish WebSocket Signaling Connection with Dynamic Addressing
   useEffect(() => {
     let reconnectTimeout: any = null;
     let isMounted = true;
     let hasPlayedConnectSound = false;
+    let wsInstance: WebSocket | null = null;
 
     const connectWebSocket = () => {
       if (!isMounted) return;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const hostname = window.location.hostname || 'localhost';
       const host = window.location.host;
+
+      const effectiveRoom = roomCode || DEFAULT_STUDIO_ROOM;
       const queryParams = new URLSearchParams({
+        id: self.id,
         peerId: self.id,
+        name: self.name,
         deviceName: self.name,
         deviceType: self.type,
+        room: effectiveRoom,
+        roomCode: effectiveRoom,
       });
-      if (roomCode) {
-        queryParams.set('roomCode', roomCode);
-      }
 
-      // Try proxied /ws endpoint first, with fallback directly to port 5000 if proxy is bypassed
-      const defaultWsUrl = `${protocol}//${host}/ws?${queryParams.toString()}`;
-      const directWsUrl = `${protocol}//${window.location.hostname}:5000/ws?${queryParams.toString()}`;
+      // Try direct backend port 8080 first (so mobile devices on LAN reach laptop Go listener directly)
+      // Fallback seamlessly to proxied /ws if direct fails
+      const direct8080Url = `${protocol}//${hostname}:8080/ws?${queryParams.toString()}`;
+      const proxiedUrl = `${protocol}//${host}/ws?${queryParams.toString()}`;
 
-      let ws: WebSocket;
+      // Choose URL based on environment
+      const targetUrl = window.location.port === '8080' ? direct8080Url : (window.location.port ? direct8080Url : proxiedUrl);
+
       try {
-        ws = new WebSocket(defaultWsUrl);
+        wsInstance = new WebSocket(targetUrl);
       } catch {
-        ws = new WebSocket(directWsUrl);
+        wsInstance = new WebSocket(proxiedUrl);
       }
-      wsRef.current = ws;
+      wsRef.current = wsInstance;
 
-      ws.onopen = () => {
+      wsInstance.onopen = () => {
         if (!isMounted) return;
-        console.log('[Signaling] WebSocket Connected to Hub');
+        console.log(`[Signaling] Connected to Studio LAN Hub in room [${effectiveRoom}] via ${targetUrl}`);
         setIsConnected(true);
         if (!hasPlayedConnectSound) {
           playConnectSound();
@@ -90,17 +119,31 @@ export function useWebRTC() {
         }
       };
 
-      ws.onclose = () => {
+      wsInstance.onclose = () => {
         if (!isMounted) return;
         setIsConnected(false);
         reconnectTimeout = setTimeout(connectWebSocket, 2000);
       };
 
-      ws.onerror = () => {
-        ws.close();
+      wsInstance.onerror = () => {
+        // Fallback to proxied socket on direct connection error
+        if (wsInstance && wsInstance.url === direct8080Url && host) {
+          try {
+            const fallbackWs = new WebSocket(proxiedUrl);
+            wsRef.current = fallbackWs;
+            fallbackWs.onopen = wsInstance.onopen;
+            fallbackWs.onclose = wsInstance.onclose;
+            fallbackWs.onerror = () => fallbackWs.close();
+            fallbackWs.onmessage = wsInstance.onmessage;
+            return;
+          } catch {
+            // continue normal close
+          }
+        }
+        if (wsInstance) wsInstance.close();
       };
 
-      ws.onmessage = async (event) => {
+      wsInstance.onmessage = async (event) => {
         try {
           const env: SignalingMessage = JSON.parse(event.data);
           await handleSignalingEnvelope(env);
@@ -148,6 +191,11 @@ export function useWebRTC() {
     });
   }, []);
 
+  // Record completed/failed transfer to ledger
+  const recordToLedger = useCallback((entry: LedgerEntry) => {
+    setTransferLedger((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)].slice(0, 50));
+  }, []);
+
   // 2. Handle Incoming Signaling Envelopes
   const handleSignalingEnvelope = async (env: SignalingMessage) => {
     switch (env.type) {
@@ -172,7 +220,7 @@ export function useWebRTC() {
         setPendingConsent({
           transferId,
           senderId: env.from!,
-          senderName: senderName || 'Nearby Peer',
+          senderName: senderName || 'Studio Device',
           metadata,
           batchCount,
           totalBatchSize,
@@ -191,6 +239,15 @@ export function useWebRTC() {
           await initiateBatchSend(transferId, queued.items, queued.targetPeerId);
         } else {
           updateTransfer(transferId, (t) => ({ ...t, status: 'rejected', error: 'Declined by recipient' }));
+          recordToLedger({
+            id: transferId,
+            fileName: queued.items[0]?.file.name || 'Files',
+            fileSize: queued.items.reduce((a, b) => a + b.file.size, 0),
+            direction: 'sending',
+            peerName: queued.targetPeerName,
+            timestamp: Date.now(),
+            status: 'rejected',
+          });
           pendingFilesToSend.current.delete(transferId);
         }
         break;
@@ -237,7 +294,7 @@ export function useWebRTC() {
           playSecretSound();
           const newSecret: SecretNote = {
             id: env.payload.id || crypto.randomUUID(),
-            senderName: env.payload.senderName || 'Peer',
+            senderName: env.payload.senderName || 'Studio Peer',
             encrypted: env.payload.encrypted,
             timestamp: Date.now(),
             status: 'locked',
@@ -283,7 +340,7 @@ export function useWebRTC() {
     channel.binaryType = 'arraybuffer';
 
     channel.onopen = () => {
-      console.log(`[DataChannel] Open with ${peerId}`);
+      console.log(`[DataChannel] Active & Ready with Studio Peer: ${peerId}`);
     };
 
     channel.onmessage = (event) => {
@@ -292,7 +349,7 @@ export function useWebRTC() {
           const control = JSON.parse(event.data);
           handleDataChannelControl(control, peerId);
         } catch (e) {
-          console.error('[DataChannel] Control parse error', e);
+          console.error('[DataChannel] Control frame error', e);
         }
       } else if (event.data instanceof ArrayBuffer) {
         handleIncomingChunk(event.data, peerId);
@@ -300,18 +357,32 @@ export function useWebRTC() {
     };
   };
 
-  // 5. Handle Control Headers
+  // 5. Handle Control Headers (MIME & Metadata Preservation)
   const handleDataChannelControl = (control: any, peerId: string) => {
-    if (control.type === 'file-start') {
-      const metadata: FileMetadata = control.metadata;
+    if (control.type === 'start' || control.type === 'file-start' || control.type === 'file-meta') {
+      const transferId = control.id || control.fileId || (control.metadata && control.metadata.id) || crypto.randomUUID();
+      const fileName = control.name || (control.metadata && control.metadata.name) || 'media-beam';
+      const fileSize = control.size || (control.metadata && control.metadata.size) || 0;
+      const mimeType = control.mimeType || control.type_mime || (control.metadata && control.metadata.type) || 'video/mp4';
+
+      const metadata: FileMetadata = {
+        id: transferId,
+        name: fileName,
+        relativePath: (control.metadata && control.metadata.relativePath) || fileName,
+        size: fileSize,
+        type: mimeType,
+        chunkCount: Math.ceil(fileSize / CHUNK_SIZE),
+        chunkSize: CHUNK_SIZE,
+      };
+
       const peer = peers.find((p) => p.id === peerId);
 
       playTransferStartSound();
 
-      receivingBuffers.current.set(metadata.id, {
+      receivingBuffers.current.set(transferId, {
         metadata,
         senderId: peerId,
-        senderName: peer?.deviceName || 'Peer',
+        senderName: peer?.deviceName || 'Studio Device',
         chunks: [],
         receivedBytes: 0,
         startTime: Date.now(),
@@ -321,10 +392,10 @@ export function useWebRTC() {
 
       setActiveTransfers((prev) => {
         const next = new Map(prev);
-        next.set(metadata.id, {
-          id: metadata.id,
+        next.set(transferId, {
+          id: transferId,
           peerId,
-          peerName: peer?.deviceName || 'Peer',
+          peerName: peer?.deviceName || 'Studio Device',
           fileName: metadata.name,
           relativePath: metadata.relativePath,
           fileSize: metadata.size,
@@ -339,8 +410,19 @@ export function useWebRTC() {
         });
         return next;
       });
-    } else if (control.type === 'file-complete') {
-      finalizeReceivedFile(control.fileId);
+    } else if (control.type === 'done' || control.type === 'file-complete') {
+      const transferId = control.id || control.fileId;
+      if (transferId) {
+        finalizeReceivedFile(transferId);
+      } else {
+        // Fallback to first matching buffer for this sender
+        for (const [id, buf] of receivingBuffers.current.entries()) {
+          if (buf.senderId === peerId) {
+            finalizeReceivedFile(id);
+            break;
+          }
+        }
+      }
     }
   };
 
@@ -352,11 +434,11 @@ export function useWebRTC() {
         buf.receivedBytes += chunk.byteLength;
 
         const now = Date.now();
-        const totalProgress = Math.min(100, Math.round((buf.receivedBytes / buf.metadata.size) * 100));
+        const totalProgress = Math.min(100, Math.round((buf.receivedBytes / (buf.metadata.size || 1)) * 100));
 
         let speedMbps = 0;
         let timeRemaining = 0;
-        if (now - buf.lastCalcTime > 400) {
+        if (now - buf.lastCalcTime > 300) {
           const deltaBytes = buf.receivedBytes - buf.lastCalcBytes;
           const deltaTime = (now - buf.lastCalcTime) / 1000;
           speedMbps = (deltaBytes / (1024 * 1024)) / (deltaTime || 1);
@@ -374,7 +456,7 @@ export function useWebRTC() {
           timeRemainingSeconds: timeRemaining || t.timeRemainingSeconds,
         }));
 
-        if (buf.receivedBytes >= buf.metadata.size) {
+        if (buf.metadata.size > 0 && buf.receivedBytes >= buf.metadata.size) {
           finalizeReceivedFile(transferId);
         }
         break;
@@ -382,22 +464,23 @@ export function useWebRTC() {
     }
   };
 
-  // 7. Auto Download & Trigger Chime
+  // 7. Receiver Auto-Save & Harmonic Completion
   const finalizeReceivedFile = (transferId: string) => {
     const buf = receivingBuffers.current.get(transferId);
     if (!buf) return;
 
     playTransferCompleteSound();
 
-    const blob = new Blob(buf.chunks, { type: buf.metadata.type || 'application/octet-stream' });
+    const blob = new Blob(buf.chunks, { type: buf.metadata.type || 'video/mp4' });
     const downloadUrl = URL.createObjectURL(blob);
+    const durationMs = Date.now() - buf.startTime;
+    const finalSpeed = durationMs > 0 ? (buf.metadata.size / (1024 * 1024)) / (durationMs / 1000) : 0;
 
-    // Save in state so mobile users can tap to save/open/share
     const receivedItem: ReceivedFile = {
       id: transferId,
       name: buf.metadata.name,
       size: buf.metadata.size,
-      type: buf.metadata.type || 'application/octet-stream',
+      type: buf.metadata.type || 'video/mp4',
       blob,
       downloadUrl,
       senderName: buf.senderName,
@@ -405,7 +488,7 @@ export function useWebRTC() {
     };
     setReceivedFiles((prev) => [receivedItem, ...prev]);
 
-    // Try programmatic download (works on Desktop)
+    // Receiver Auto-Save via Programmatic Anchor
     try {
       const a = document.createElement('a');
       a.href = downloadUrl;
@@ -414,10 +497,8 @@ export function useWebRTC() {
       a.click();
       document.body.removeChild(a);
     } catch (e) {
-      console.warn('[Download] Programmatic download blocked by browser, user can tap save button.', e);
+      console.warn('[Download] Auto-save blocked by browser policy, accessible in drawer:', e);
     }
-
-    const totalDurationMs = Date.now() - buf.startTime;
 
     updateTransfer(transferId, (t) => ({
       ...t,
@@ -426,20 +507,33 @@ export function useWebRTC() {
       status: 'completed',
     }));
 
-    // Post non-sensitive metrics to Neon PostgreSQL ledger
+    // Record in local session ledger
+    recordToLedger({
+      id: transferId,
+      fileName: buf.metadata.name,
+      fileSize: buf.metadata.size,
+      direction: 'receiving',
+      peerName: buf.senderName,
+      timestamp: Date.now(),
+      durationMs,
+      speedMbps: finalSpeed,
+      status: 'completed',
+    });
+
+    // Post metrics to Go backend ledger
     logTransferLedger({
-      roomCode,
+      roomCode: roomCode || DEFAULT_STUDIO_ROOM,
       fileName: buf.metadata.name,
       fileSizeBytes: buf.metadata.size,
       mimeType: buf.metadata.type,
       senderDevice: buf.senderName,
       receiverDevice: self.name,
-      durationMs: totalDurationMs,
+      durationMs,
       status: 'COMPLETED',
     });
 
     receivingBuffers.current.delete(transferId);
-    setTimeout(() => URL.revokeObjectURL(downloadUrl), 60000);
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 180000);
   };
 
   // 8. Initiate File or Directory Batch Transfer
@@ -448,7 +542,7 @@ export function useWebRTC() {
 
     const transferId = crypto.randomUUID ? crypto.randomUUID() : 'tx-' + Math.random().toString(36).substring(2, 9);
     const targetPeer = peers.find((p) => p.id === targetPeerId);
-    const targetPeerName = targetPeer?.deviceName || 'Peer';
+    const targetPeerName = targetPeer?.deviceName || 'Studio Peer';
 
     pendingFilesToSend.current.set(transferId, { items, targetPeerId, targetPeerName });
 
@@ -460,7 +554,7 @@ export function useWebRTC() {
       name: items.length > 1 ? `${firstItem.file.name} (+${items.length - 1} files)` : firstItem.file.name,
       relativePath: firstItem.relativePath,
       size: totalBatchSize,
-      type: firstItem.file.type || 'application/octet-stream',
+      type: firstItem.file.type || 'video/mp4',
       chunkCount: Math.ceil(totalBatchSize / CHUNK_SIZE),
       chunkSize: CHUNK_SIZE,
     };
@@ -499,7 +593,7 @@ export function useWebRTC() {
     });
   };
 
-  // 9. Backpressure-aware DataChannel Streaming
+  // 9. Backpressure Flow Control (64KB Slicing & 8MB threshold)
   const initiateBatchSend = async (transferId: string, items: FileItem[], targetPeerId: string) => {
     const pc = getOrCreatePeerConnection(targetPeerId);
 
@@ -519,6 +613,7 @@ export function useWebRTC() {
         payload: offer,
       });
 
+      // Readiness Wait: Guarantee channel.readyState === "open" before transmitting
       await new Promise<void>((resolve, reject) => {
         if (channel?.readyState === 'open') return resolve();
         const onOpen = () => {
@@ -526,7 +621,7 @@ export function useWebRTC() {
           resolve();
         };
         channel?.addEventListener('open', onOpen);
-        setTimeout(() => reject(new Error('DataChannel connection timeout')), 10000);
+        setTimeout(() => reject(new Error('DataChannel connection timeout')), 12000);
       });
     }
 
@@ -538,86 +633,129 @@ export function useWebRTC() {
       name: items.length > 1 ? `${firstItem.file.name} (+${items.length - 1} files)` : firstItem.file.name,
       relativePath: firstItem.relativePath,
       size: totalBatchSize,
-      type: firstItem.file.type || 'application/octet-stream',
+      type: firstItem.file.type || 'video/mp4',
       chunkCount: Math.ceil(totalBatchSize / CHUNK_SIZE),
       chunkSize: CHUNK_SIZE,
     };
 
-    channel.send(JSON.stringify({ type: 'file-start', metadata }));
+    // Send JSON start metadata packet (MIME Type Preservation)
+    channel.send(JSON.stringify({
+      type: 'start',
+      id: transferId,
+      name: metadata.name,
+      size: metadata.size,
+      mimeType: metadata.type || 'video/mp4',
+      metadata,
+    }));
 
     const startTime = Date.now();
     let overallOffset = 0;
     let lastCalcTime = Date.now();
     let lastCalcOffset = 0;
 
-    for (const item of items) {
-      let fileOffset = 0;
-      while (fileOffset < item.file.size) {
-        // Backpressure check (8MB limit)
-        if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-          await new Promise<void>((resolve) => {
-            const onLow = () => {
-              channel?.removeEventListener('bufferedamountlow', onLow);
-              resolve();
-            };
-            channel?.addEventListener('bufferedamountlow', onLow);
-          });
-        }
+    const targetPeer = peers.find((p) => p.id === targetPeerId);
+    const peerName = targetPeer?.deviceName || 'Studio Peer';
 
-        const slice = item.file.slice(fileOffset, fileOffset + CHUNK_SIZE);
-        const buffer = await slice.arrayBuffer();
-        channel.send(buffer);
-        fileOffset += buffer.byteLength;
-        overallOffset += buffer.byteLength;
+    try {
+      for (const item of items) {
+        let fileOffset = 0;
+        while (fileOffset < item.file.size) {
+          // Flow Control Backpressure: pause if buffered amount exceeds 8MB
+          if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+            await new Promise<void>((resolve) => {
+              const onLow = () => {
+                channel?.removeEventListener('bufferedamountlow', onLow);
+                resolve();
+              };
+              channel?.addEventListener('bufferedamountlow', onLow);
+            });
+          }
 
-        const now = Date.now();
-        if (now - lastCalcTime > 400 || overallOffset >= totalBatchSize) {
-          const deltaBytes = overallOffset - lastCalcOffset;
-          const deltaTime = (now - lastCalcTime) / 1000;
-          const speedMbps = (deltaBytes / (1024 * 1024)) / (deltaTime || 1);
-          const remainingBytes = totalBatchSize - overallOffset;
-          const timeRemaining = speedMbps > 0 ? (remainingBytes / (1024 * 1024)) / speedMbps : 0;
+          const slice = item.file.slice(fileOffset, fileOffset + CHUNK_SIZE);
+          const buffer = await slice.arrayBuffer();
+          channel.send(buffer);
+          fileOffset += buffer.byteLength;
+          overallOffset += buffer.byteLength;
 
-          lastCalcTime = now;
-          lastCalcOffset = overallOffset;
+          const now = Date.now();
+          if (now - lastCalcTime > 300 || overallOffset >= totalBatchSize) {
+            const deltaBytes = overallOffset - lastCalcOffset;
+            const deltaTime = (now - lastCalcTime) / 1000;
+            const speedMbps = (deltaBytes / (1024 * 1024)) / (deltaTime || 1);
+            const remainingBytes = totalBatchSize - overallOffset;
+            const timeRemaining = speedMbps > 0 ? (remainingBytes / (1024 * 1024)) / speedMbps : 0;
 
-          updateTransfer(transferId, (t) => ({
-            ...t,
-            progress: Math.min(100, Math.round((overallOffset / totalBatchSize) * 100)),
-            bytesTransferred: overallOffset,
-            speedMbps,
-            timeRemainingSeconds: timeRemaining,
-          }));
+            lastCalcTime = now;
+            lastCalcOffset = overallOffset;
+
+            updateTransfer(transferId, (t) => ({
+              ...t,
+              progress: Math.min(100, Math.round((overallOffset / (totalBatchSize || 1)) * 100)),
+              bytesTransferred: overallOffset,
+              speedMbps,
+              timeRemainingSeconds: timeRemaining,
+            }));
+          }
         }
       }
+
+      // Signal completion with { type: "done" }
+      channel.send(JSON.stringify({ type: 'done', id: transferId, fileId: transferId }));
+      playTransferCompleteSound();
+
+      const totalDurationMs = Date.now() - startTime;
+      const finalSpeed = totalDurationMs > 0 ? (totalBatchSize / (1024 * 1024)) / (totalDurationMs / 1000) : 0;
+
+      updateTransfer(transferId, (t) => ({
+        ...t,
+        progress: 100,
+        bytesTransferred: totalBatchSize,
+        status: 'completed',
+      }));
+
+      // Record in session ledger
+      recordToLedger({
+        id: transferId,
+        fileName: metadata.name,
+        fileSize: totalBatchSize,
+        direction: 'sending',
+        peerName,
+        timestamp: Date.now(),
+        durationMs: totalDurationMs,
+        speedMbps: finalSpeed,
+        status: 'completed',
+      });
+
+      // Post metrics to Go ledger backend
+      logTransferLedger({
+        roomCode: roomCode || DEFAULT_STUDIO_ROOM,
+        fileName: metadata.name,
+        fileSizeBytes: totalBatchSize,
+        mimeType: metadata.type,
+        senderDevice: self.name,
+        receiverDevice: peerName,
+        durationMs: totalDurationMs,
+        status: 'COMPLETED',
+      });
+    } catch (err: any) {
+      console.error('[Send] Transfer stream error:', err);
+      updateTransfer(transferId, (t) => ({
+        ...t,
+        status: 'failed',
+        error: err?.message || 'DataChannel streaming error',
+      }));
+      recordToLedger({
+        id: transferId,
+        fileName: metadata.name,
+        fileSize: totalBatchSize,
+        direction: 'sending',
+        peerName,
+        timestamp: Date.now(),
+        status: 'failed',
+      });
+    } finally {
+      pendingFilesToSend.current.delete(transferId);
     }
-
-    channel.send(JSON.stringify({ type: 'file-complete', fileId: transferId }));
-    playTransferCompleteSound();
-
-    const totalDurationMs = Date.now() - startTime;
-    const targetPeer = peers.find((p) => p.id === targetPeerId);
-
-    updateTransfer(transferId, (t) => ({
-      ...t,
-      progress: 100,
-      bytesTransferred: totalBatchSize,
-      status: 'completed',
-    }));
-
-    // Post to Neon PostgreSQL ledger
-    logTransferLedger({
-      roomCode,
-      fileName: metadata.name,
-      fileSizeBytes: totalBatchSize,
-      mimeType: metadata.type,
-      senderDevice: self.name,
-      receiverDevice: targetPeer?.deviceName || 'Peer',
-      durationMs: totalDurationMs,
-      status: 'COMPLETED',
-    });
-
-    pendingFilesToSend.current.delete(transferId);
   };
 
   // 10. Consent Response
@@ -636,7 +774,7 @@ export function useWebRTC() {
     setPendingConsent(null);
   };
 
-  // 11. End-to-End Encrypted Secret Note Beam (AES-256-GCM)
+  // 11. End-to-End Encrypted Secret Note Beam
   const sendSecretNote = async (text: string, passphrase: string, targetPeerId?: string) => {
     if (!text.trim() || !passphrase.trim()) return;
 
@@ -646,16 +784,16 @@ export function useWebRTC() {
     sendEnvelope({
       type: 'encrypted-secret',
       to: targetPeerId,
-      roomCode,
+      roomCode: roomCode || DEFAULT_STUDIO_ROOM,
       payload: {
-        id: crypto.randomUUID(),
+        id: crypto.randomUUID ? crypto.randomUUID() : 'sec-' + Math.random().toString(36).substring(2, 9),
         senderName: self.name,
         encrypted,
       },
     });
   };
 
-  // 12. Decrypt Received Secret Note locally in browser
+  // 12. Decrypt Received Secret Note locally
   const decryptSecretNote = async (noteId: string, passphrase: string): Promise<boolean> => {
     const note = secretNotes.find((n) => n.id === noteId);
     if (!note) return false;
@@ -689,16 +827,34 @@ export function useWebRTC() {
     }
   };
 
-  // 14. Reset to Automatic Subnet Room
+  // 14. Reset to Default Studio LAN Room
   const resetToSubnetRoom = () => {
     localStorage.removeItem('lan_courier_room_code');
     setIsCustomRoom(false);
-    setRoomCode('');
-    // Trigger reconnection to auto-detect subnet room
-    if (wsRef.current) wsRef.current.close();
+    setRoomCode(DEFAULT_STUDIO_ROOM);
+    sendEnvelope({
+      type: 'join-custom-room',
+      payload: { roomCode: DEFAULT_STUDIO_ROOM },
+    });
   };
 
-  // 15. Helper to log metrics to Neon Postgres
+  // 15. Helper to simulate a local peer for testing
+  const simulatePeer = () => {
+    const mockId = 'sim-' + Math.random().toString(36).substring(2, 7);
+    const mockNames = ['Studio iPad Pro (M4)', 'iPhone 16 Pro Max', 'Editorial MacBook M3', 'Sony Cinema Rig'];
+    const mockName = mockNames[Math.floor(Math.random() * mockNames.length)];
+    const mockType = mockName.includes('iPhone') ? 'mobile' : mockName.includes('iPad') ? 'tablet' : 'desktop';
+    const mockPeer: Peer = {
+      id: mockId,
+      deviceName: mockName,
+      deviceType: mockType as any,
+      ipAddress: myIP || '192.168.1.142',
+      ip: myIP || '192.168.1.142',
+    };
+    setPeers((prev) => [mockPeer, ...prev.filter((p) => p.id !== mockId)]);
+  };
+
+  // 16. Helper to log metrics
   const logTransferLedger = async (data: any) => {
     try {
       await fetch('/api/transfers', {
@@ -707,7 +863,7 @@ export function useWebRTC() {
         body: JSON.stringify(data),
       });
     } catch (e) {
-      console.warn('[Ledger] Transfer log push error:', e);
+      console.warn('[Ledger] Transfer log push bypassed:', e);
     }
   };
 
@@ -721,17 +877,24 @@ export function useWebRTC() {
     setReceivedFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
+  const clearTransferLedger = () => {
+    setTransferLedger([]);
+    localStorage.removeItem('lan_courier_ledger');
+  };
+
   return {
     self,
     myIP,
     peers,
-    roomCode,
+    roomCode: roomCode || DEFAULT_STUDIO_ROOM,
     isCustomRoom,
     isConnected,
     activeTransfers: Array.from(activeTransfers.values()),
     pendingConsent,
     secretNotes,
     receivedFiles,
+    transferLedger,
+    clearTransferLedger,
     dismissReceivedFile,
     sendFiles,
     respondConsent,
@@ -739,6 +902,7 @@ export function useWebRTC() {
     decryptSecretNote,
     joinCustomRoom,
     resetToSubnetRoom,
+    simulatePeer,
     updateDeviceName,
   };
 }

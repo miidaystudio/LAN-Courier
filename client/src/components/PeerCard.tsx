@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Peer } from '../types';
 import { getPeerTheme } from '../utils/names';
 import { parseDroppedItems, FileItem } from '../utils/fileTree';
-import { Laptop, Smartphone, Tablet, Upload, FolderUp } from 'lucide-react';
+import { Laptop, Smartphone, Tablet, Upload, FolderUp, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface PeerCardProps {
   peer: Peer;
@@ -56,23 +56,25 @@ export const PeerCard: React.FC<PeerCardProps> = ({ peer, onSendFiles }) => {
   const renderDeviceIcon = () => {
     switch (peer.deviceType) {
       case 'mobile':
-        return <Smartphone className="w-4 h-4" />;
+        return <Smartphone className="w-3.5 h-3.5" />;
       case 'tablet':
-        return <Tablet className="w-4 h-4" />;
+        return <Tablet className="w-3.5 h-3.5" />;
       default:
-        return <Laptop className="w-4 h-4" />;
+        return <Laptop className="w-3.5 h-3.5" />;
     }
   };
+
+  const displayIP = peer.ipAddress || peer.ip || 'LAN Peer';
 
   return (
     <div
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative group rounded-3xl p-6 transition-all duration-300 editorial-card ${
+      className={`relative group rounded-3xl p-5 sm:p-6 transition-all duration-300 bg-[#0D0D10]/90 backdrop-blur-xl border ${
         isDragOver
-          ? 'ring-2 ring-blue-500 scale-[1.02] bg-blue-50/70 border-blue-300'
-          : 'editorial-card-hover border-zinc-200/80 hover:border-zinc-300'
+          ? 'border-white/40 bg-white/[0.08] shadow-[0_0_30px_rgba(255,255,255,0.1)] scale-[1.02]'
+          : 'border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.5)] hover:border-white/20 hover:bg-[#131317]'
       }`}
     >
       {/* Hidden File & Folder Inputs */}
@@ -91,14 +93,14 @@ export const PeerCard: React.FC<PeerCardProps> = ({ peer, onSendFiles }) => {
         {...({ webkitdirectory: '', directory: '' } as any)}
       />
 
-      <div className="flex items-start justify-between">
-        {/* Animal Avatar */}
-        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-xl border ${theme.bg} shadow-sm group-hover:scale-105 transition-transform duration-200`}>
+      <div className="flex items-start justify-between gap-3">
+        {/* Device Initials Avatar */}
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-lg border ${theme.bg} shadow-sm group-hover:scale-105 transition-transform duration-200`}>
           {peer.deviceName.split(' ').map((w) => w[0]).join('')}
         </div>
 
-        {/* Device Type Badge */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 text-zinc-600 border border-zinc-200">
+        {/* Device Type Pill */}
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/[0.04] text-zinc-300 border border-white/10">
           {renderDeviceIcon()}
           <span className="capitalize">{peer.deviceType || 'Desktop'}</span>
         </div>
@@ -106,43 +108,47 @@ export const PeerCard: React.FC<PeerCardProps> = ({ peer, onSendFiles }) => {
 
       <div className="mt-4">
         <div className="flex items-center gap-2">
-          <h3 className="font-semibold text-zinc-900 text-base tracking-tight truncate">
+          <h3 className="font-bold text-white text-lg tracking-tight truncate" title={peer.deviceName}>
             {peer.deviceName}
           </h3>
-          <span className={`w-2 h-2 rounded-full ${theme.dot} animate-pulse`} title="Online" />
+          <span className={`w-2 h-2 rounded-full ${theme.dot} animate-pulse flex-shrink-0`} title="Connected" />
         </div>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="font-mono text-[11px] text-zinc-600 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded-lg">
-            IP: <strong className="text-zinc-800 font-semibold">{peer.ipAddress || peer.ip || 'LAN Peer'}</strong>
+
+        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          <span className="font-mono text-[11px] text-zinc-300 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-lg font-medium">
+            IP: <strong className="text-emerald-400 font-semibold">{displayIP}</strong>
           </span>
-          <span className="text-[11px] text-emerald-600 font-medium">Direct P2P</span>
+          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-lg font-semibold">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>P2P Direct</span>
+          </span>
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="mt-5 pt-4 border-t border-zinc-100 flex items-center gap-2">
+      {/* Tactile "Tap or Drop to Beam" Action Target */}
+      <div className="mt-5 pt-4 border-t border-white/[0.08] flex items-center gap-2">
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold transition-colors shadow-sm"
+          className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-full bg-white hover:bg-zinc-200 text-black text-xs font-bold transition-all shadow-[0_0_15px_rgba(255,255,255,0.1)] active:scale-[0.98] group/btn"
         >
-          <Upload className="w-3.5 h-3.5" />
-          <span>Send Files</span>
+          <Upload className="w-3.5 h-3.5 text-black group-hover/btn:translate-y-[-1px] transition-transform" />
+          <span>Tap or Drop to Beam</span>
         </button>
 
         <button
           onClick={() => folderInputRef.current?.click()}
           title="Send Entire Folder"
-          className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs transition-colors"
+          className="p-2.5 rounded-full bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 border border-white/10 text-xs transition-colors active:scale-[0.98]"
         >
-          <FolderUp className="w-3.5 h-3.5" />
+          <FolderUp className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Drag Overlay with Folder Support */}
+      {/* Drag Overlay */}
       {isDragOver && (
-        <div className="absolute inset-0 bg-blue-600/10 rounded-3xl border-2 border-dashed border-blue-500 flex flex-col items-center justify-center backdrop-blur-[2px] pointer-events-none">
-          <Upload className="w-8 h-8 text-blue-600 animate-bounce mb-1" />
-          <p className="text-xs font-bold text-blue-900">Drop files or folders to beam</p>
+        <div className="absolute inset-0 bg-black/80 rounded-3xl border-2 border-dashed border-white/40 flex flex-col items-center justify-center backdrop-blur-md pointer-events-none animate-fade-in">
+          <Sparkles className="w-8 h-8 text-white animate-bounce mb-1" />
+          <p className="text-xs font-bold text-white">Release to beam files instantly</p>
         </div>
       )}
     </div>
