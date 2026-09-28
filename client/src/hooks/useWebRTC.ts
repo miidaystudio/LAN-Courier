@@ -94,24 +94,39 @@ export function useWebRTC() {
         roomCode: effectiveRoom,
       });
 
-      // Try direct backend port 8080 first (so mobile devices on LAN reach laptop Go listener directly)
-      // Fallback seamlessly to proxied /ws if direct fails
-      const direct8080Url = `${protocol}//${hostname}:8080/ws?${queryParams.toString()}`;
-      const proxiedUrl = `${protocol}//${host}/ws?${queryParams.toString()}`;
+      // Determine signaling WebSocket URL:
+      // 1. Env variable VITE_SIGNALING_URL (e.g. wss://lan-courier.onrender.com/ws)
+      // 2. Direct Render URL wss://lan-courier.onrender.com/ws
+      // 3. Local direct :8080 or proxied /ws
+      const envSignalingUrl = import.meta.env.VITE_SIGNALING_URL;
+      const renderWsBase = 'wss://lan-courier.onrender.com/ws';
+      
+      let targetUrl: string;
+      if (envSignalingUrl) {
+        const separator = envSignalingUrl.includes('?') ? '&' : '?';
+        targetUrl = `${envSignalingUrl}${separator}${queryParams.toString()}`;
+      } else if (window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.') && !window.location.hostname.startsWith('10.') && !window.location.hostname.startsWith('172.')) {
+        targetUrl = `${renderWsBase}?${queryParams.toString()}`;
+      } else {
+        targetUrl = `${renderWsBase}?${queryParams.toString()}`;
+      }
 
-      // Choose URL based on environment
-      const targetUrl = window.location.port === '8080' ? direct8080Url : (window.location.port ? direct8080Url : proxiedUrl);
+      const localFallbackUrl = `${protocol}//${hostname}:8080/ws?${queryParams.toString()}`;
 
       try {
         wsInstance = new WebSocket(targetUrl);
       } catch {
-        wsInstance = new WebSocket(proxiedUrl);
+        try {
+          wsInstance = new WebSocket(localFallbackUrl);
+        } catch {
+          wsInstance = new WebSocket(`${protocol}//${host}/ws?${queryParams.toString()}`);
+        }
       }
       wsRef.current = wsInstance;
 
       wsInstance.onopen = () => {
         if (!isMounted) return;
-        console.log(`[Signaling] Connected to Studio LAN Hub in room [${effectiveRoom}] via ${targetUrl}`);
+        console.log(`[Signaling] Connected to Studio Hub in room [${effectiveRoom}] via ${targetUrl}`);
         setIsConnected(true);
         if (!hasPlayedConnectSound) {
           playConnectSound();
@@ -126,10 +141,10 @@ export function useWebRTC() {
       };
 
       wsInstance.onerror = () => {
-        // Fallback to proxied socket on direct connection error
-        if (wsInstance && wsInstance.url === direct8080Url && host) {
+        // If primary connection fails, fallback to local or proxied
+        if (wsInstance && wsInstance.url.includes('onrender.com')) {
           try {
-            const fallbackWs = new WebSocket(proxiedUrl);
+            const fallbackWs = new WebSocket(localFallbackUrl);
             wsRef.current = fallbackWs;
             fallbackWs.onopen = wsInstance.onopen;
             fallbackWs.onclose = wsInstance.onclose;
@@ -137,7 +152,7 @@ export function useWebRTC() {
             fallbackWs.onmessage = wsInstance.onmessage;
             return;
           } catch {
-            // continue normal close
+            // continue
           }
         }
         if (wsInstance) wsInstance.close();
@@ -857,7 +872,9 @@ export function useWebRTC() {
   // 16. Helper to log metrics
   const logTransferLedger = async (data: any) => {
     try {
-      await fetch('/api/transfers', {
+      const backendBase = import.meta.env.VITE_BACKEND_URL || '';
+      const endpoint = backendBase ? `${backendBase}/api/transfers` : '/api/transfers';
+      await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

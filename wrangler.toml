@@ -1,0 +1,9 @@
+name = "lan-courier-frontend"
+main = "worker/index.ts"
+compatibility_date = "2024-09-23"
+
+# Cloudflare Static Assets Binding pointing to the built Vite frontend
+[assets]
+directory = "./client/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
